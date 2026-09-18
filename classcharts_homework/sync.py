@@ -5,10 +5,16 @@ import hashlib
 import os
 import re
 import sys
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from .client import ClassChartsError, ConfigurationError, Homework, StudentClient, _iso_date
+from .client import (
+    ClassChartsError,
+    ConfigurationError,
+    Homework,
+    StudentClient,
+    _iso_date,
+)
 from .google_calendar import CalendarError, GoogleCalendar
 
 
@@ -16,127 +22,137 @@ def _zone(value):
     try:
         return ZoneInfo(value)
     except (ValueError, ZoneInfoNotFoundError):
-        raise ConfigurationError("CALENDAR_TIMEZONE must be a valid IANA timezone.") from None
+        raise ConfigurationError(
+            "CALENDAR_TIMEZONE must be a valid IANA timezone."
+        ) from None
 
 
 def _days(env, name, default):
     value = env.get(name, str(default))
+
     if not re.fullmatch(r"[0-9]{1,3}", value) or not 0 <= int(value) <= 365:
-        raise ConfigurationError(name + " must be an integer from 0 to 365.")
+        raise ConfigurationError(
+            name + " must be an integer from 0 to 365."
+        )
+
     return int(value)
 
 
-def date_window(env, *, from_date=None, to_date=None, now=None):
-    zone = _zone(env.get("CALENDAR_TIMEZONE", "Europe/London"))
+def date_window(
+    env,
+    *,
+    from_date=None,
+    to_date=None,
+    now=None,
+):
+    zone = _zone(
+        env.get(
+            "CALENDAR_TIMEZONE",
+            "Europe/London",
+        )
+    )
 
     if (from_date is None) != (to_date is None):
-        raise ConfigurationError("Provide both --from and --to, or neither.")
+        raise ConfigurationError(
+            "Provide both --from and --to, or neither."
+        )
 
     if from_date is not None:
-        start = _iso_date(from_date, "from_date")
-        end = _iso_date(to_date, "to_date")
+        start = _iso_date(
+            from_date,
+            "from_date",
+        )
+        end = _iso_date(
+            to_date,
+            "to_date",
+        )
     else:
-        today = (now or datetime.now(zone)).astimezone(zone).date()
-        start = today - timedelta(days=_days(env, "SYNC_DAYS_BACK", 7))
-        end = today + timedelta(days=_days(env, "SYNC_DAYS_AHEAD", 90))
+        today = (
+            now or datetime.now(zone)
+        ).astimezone(zone).date()
+
+        start = today - timedelta(
+            days=_days(
+                env,
+                "SYNC_DAYS_BACK",
+                7,
+            )
+        )
+
+        end = today + timedelta(
+            days=_days(
+                env,
+                "SYNC_DAYS_AHEAD",
+                90,
+            )
+        )
 
     if start > end:
-        raise ConfigurationError("from_date must be on or before to_date.")
+        raise ConfigurationError(
+            "from_date must be on or before to_date."
+        )
 
-    return start.isoformat(), end.isoformat(), zone
+    return (
+        start.isoformat(),
+        end.isoformat(),
+        zone,
+    )
 
 
 def _due_date(value, zone):
     try:
-        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+        if re.fullmatch(
+            r"\d{4}-\d{2}-\d{2}",
+            value,
+        ):
             return date.fromisoformat(value)
 
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(
+            value.replace(
+                "Z",
+                "+00:00",
+            )
+        )
 
         if parsed.tzinfo:
-            return parsed.astimezone(zone).date()
+            return parsed.astimezone(
+                zone
+            ).date()
 
         return parsed.date()
 
-    except (ValueError, TypeError, OverflowError):
+    except (
+        ValueError,
+        TypeError,
+        OverflowError,
+    ):
         raise CalendarError(
-            "A homework due date could not be interpreted; no sync was started."
+            "A homework due date could not be interpreted; "
+            "no sync was started."
         ) from None
 
 
-def _minutes_before(event_start, reminder_time):
-    event_utc = event_start.astimezone(timezone.utc)
-    reminder_utc = reminder_time.astimezone(timezone.utc)
-
-    minutes = int(
-        (event_utc - reminder_utc).total_seconds() // 60
-    )
-
-    if minutes < 0 or minutes > 40320:
-        raise CalendarError(
-            "A homework reminder fell outside Google Calendar's supported range."
-        )
-
-    return minutes
-
-
-def _pending_reminders(due, zone):
-    event_start = datetime.combine(
-        due,
-        time(7, 0),
-        tzinfo=zone,
-    )
-
-    monday = due - timedelta(days=due.weekday())
-    saturday = monday - timedelta(days=2)
-
-    saturday_at_8 = datetime.combine(
-        saturday,
-        time(8, 0),
-        tzinfo=zone,
-    )
-
-    day_before_at_17 = datetime.combine(
-        due - timedelta(days=1),
-        time(17, 0),
-        tzinfo=zone,
-    )
-
-    return {
-        "useDefault": False,
-        "overrides": [
-            {
-                "method": "popup",
-                "minutes": _minutes_before(
-                    event_start,
-                    saturday_at_8,
-                ),
-            },
-            {
-                "method": "popup",
-                "minutes": _minutes_before(
-                    event_start,
-                    day_before_at_17,
-                ),
-            },
-            {
-                "method": "popup",
-                "minutes": 0,
-            },
-        ],
-    }
-
-
-def build_events(homework: list[Homework], student_id: int, zone) -> list[dict]:
+def build_events(
+    homework: list[Homework],
+    student_id: int,
+    zone,
+) -> list[dict]:
     """Validate the entire batch before writing."""
 
-    if type(student_id) is not int or student_id <= 0:
+    if (
+        type(student_id) is not int
+        or student_id <= 0
+    ):
         raise CalendarError(
-            "An authenticated student identity is required for calendar sync."
+            "An authenticated student identity is required "
+            "for calendar sync."
         )
 
     source = hashlib.sha256(
-        ("classcharts-student-v1:" + str(student_id)).encode()
+        (
+            "classcharts-student-v1:"
+            + str(student_id)
+        ).encode()
     ).hexdigest()
 
     events = {}
@@ -145,7 +161,10 @@ def build_events(homework: list[Homework], student_id: int, zone) -> list[dict]:
         if not item.due_date:
             continue
 
-        due = _due_date(item.due_date, zone)
+        due = _due_date(
+            item.due_date,
+            zone,
+        )
 
         start = datetime.combine(
             due,
@@ -153,23 +172,41 @@ def build_events(homework: list[Homework], student_id: int, zone) -> list[dict]:
             tzinfo=zone,
         )
 
-        end = start + timedelta(minutes=15)
+        end = start + timedelta(
+            minutes=15
+        )
 
-        event_id = "cc" + hashlib.sha256(
-            (source + ":" + str(item.id)).encode()
-        ).hexdigest()
+        event_id = (
+            "cc"
+            + hashlib.sha256(
+                (
+                    source
+                    + ":"
+                    + str(item.id)
+                ).encode()
+            ).hexdigest()
+        )
 
         done = (
             item.ticked is True
             or item.status == "completed"
         )
 
-        title = " ".join(item.title.split())
-        subject = " ".join((item.subject or "").split())
+        title = " ".join(
+            item.title.split()
+        )
+
+        subject = " ".join(
+            (item.subject or "").split()
+        )
 
         summary = (
             ("Done: " if done else "")
-            + ((subject + ": ") if subject else "")
+            + (
+                (subject + ": ")
+                if subject
+                else ""
+            )
             + title
         )
 
@@ -199,14 +236,21 @@ def build_events(homework: list[Homework], student_id: int, zone) -> list[dict]:
             "status": "confirmed",
             "visibility": "private",
             "transparency": "transparent",
+
+            # Pending homework uses Kirill's default
+            # notifications configured on the Homework calendar.
+            #
+            # Completed homework explicitly disables notifications.
             "reminders": (
-                {"useDefault": False}
+                {
+                    "useDefault": False,
+                }
                 if done
-                else _pending_reminders(
-                    due,
-                    zone,
-                )
+                else {
+                    "useDefault": True,
+                }
             ),
+
             "extendedProperties": {
                 "private": {
                     "cc_managed": "v1",
@@ -220,12 +264,15 @@ def build_events(homework: list[Homework], student_id: int, zone) -> list[dict]:
             and events[event_id] != event
         ):
             raise CalendarError(
-                "Conflicting homework records were returned; no sync was started."
+                "Conflicting homework records were returned; "
+                "no sync was started."
             )
 
         events[event_id] = event
 
-    return list(events.values())
+    return list(
+        events.values()
+    )
 
 
 def synchronize(
@@ -269,7 +316,9 @@ def main(argv=None):
     parser.add_argument(
         "--apply",
         action="store_true",
-        help="Create and update managed calendar events.",
+        help=(
+            "Create and update managed calendar events."
+        ),
     )
 
     parser.add_argument(
@@ -293,10 +342,7 @@ def main(argv=None):
             to_date=args.to_date,
         )
 
-        with (
-            StudentClient.from_env() as student,
-            GoogleCalendar.from_env() as calendar,
-        ):
+        with StudentClient.from_env() as student, GoogleCalendar.from_env() as calendar:
             synchronize(
                 student,
                 calendar,
@@ -307,7 +353,10 @@ def main(argv=None):
             )
 
     except ClassChartsError as exc:
-        print(str(exc), file=sys.stderr)
+        print(
+            str(exc),
+            file=sys.stderr,
+        )
         return 1
 
     except Exception:
@@ -321,8 +370,10 @@ def main(argv=None):
     print(
         "Calendar sync succeeded."
         if args.apply
-        else "Calendar dry run succeeded. "
-        "No events were changed."
+        else (
+            "Calendar dry run succeeded. "
+            "No events were changed."
+        )
     )
 
     return 0

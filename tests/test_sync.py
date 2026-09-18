@@ -21,14 +21,27 @@ def homework(*, due, ticked=False, status="not_completed"):
     )
 
 
-class ReminderTests(unittest.TestCase):
+class SyncEventTests(unittest.TestCase):
     def event_for(self, item):
-        events = build_events([item], 999, ZONE)
-        self.assertEqual(len(events), 1)
+        events = build_events(
+            [item],
+            999,
+            ZONE,
+        )
+
+        self.assertEqual(
+            len(events),
+            1,
+        )
+
         return events[0]
 
     def test_event_is_at_7am_on_due_date(self):
-        event = self.event_for(homework(due="2026-09-21"))
+        event = self.event_for(
+            homework(
+                due="2026-09-21",
+            )
+        )
 
         self.assertEqual(
             event["start"]["dateTime"],
@@ -40,48 +53,21 @@ class ReminderTests(unittest.TestCase):
             "2026-09-21T07:15:00+01:00",
         )
 
-    def test_monday_due_reminders(self):
-        event = self.event_for(homework(due="2026-09-21"))
-
-        self.assertEqual(
-            event["reminders"]["overrides"],
-            [
-                {"method": "popup", "minutes": 2820},
-                {"method": "popup", "minutes": 840},
-                {"method": "popup", "minutes": 0},
-            ],
-        )
-
-    def test_sunday_due_uses_previous_saturday(self):
-        event = self.event_for(homework(due="2026-09-27"))
-
-        self.assertEqual(
-            event["reminders"]["overrides"],
-            [
-                {"method": "popup", "minutes": 11460},
-                {"method": "popup", "minutes": 840},
-                {"method": "popup", "minutes": 0},
-            ],
-        )
-
-    def test_dst_change_keeps_local_times(self):
-        event = self.event_for(homework(due="2026-10-26"))
-
-        self.assertEqual(
-            event["start"]["dateTime"],
-            "2026-10-26T07:00:00+00:00",
+    def test_pending_homework_uses_calendar_defaults(self):
+        event = self.event_for(
+            homework(
+                due="2026-09-21",
+            )
         )
 
         self.assertEqual(
-            event["reminders"]["overrides"],
-            [
-                {"method": "popup", "minutes": 2880},
-                {"method": "popup", "minutes": 840},
-                {"method": "popup", "minutes": 0},
-            ],
+            event["reminders"],
+            {
+                "useDefault": True,
+            },
         )
 
-    def test_completed_homework_has_no_reminders(self):
+    def test_completed_homework_disables_reminders(self):
         event = self.event_for(
             homework(
                 due="2026-09-21",
@@ -92,11 +78,98 @@ class ReminderTests(unittest.TestCase):
 
         self.assertEqual(
             event["reminders"],
-            {"useDefault": False},
+            {
+                "useDefault": False,
+            },
+        )
+
+    def test_completed_homework_is_marked_done(self):
+        event = self.event_for(
+            homework(
+                due="2026-09-21",
+                ticked=True,
+                status="completed",
+            )
         )
 
         self.assertTrue(
-            event["summary"].startswith("Done: ")
+            event["summary"].startswith(
+                "Done: "
+            )
+        )
+
+    def test_status_completed_is_enough_to_mark_done(self):
+        event = self.event_for(
+            homework(
+                due="2026-09-21",
+                ticked=False,
+                status="completed",
+            )
+        )
+
+        self.assertEqual(
+            event["reminders"],
+            {
+                "useDefault": False,
+            },
+        )
+
+        self.assertTrue(
+            event["summary"].startswith(
+                "Done: "
+            )
+        )
+
+    def test_ticked_homework_is_enough_to_mark_done(self):
+        event = self.event_for(
+            homework(
+                due="2026-09-21",
+                ticked=True,
+                status="not_completed",
+            )
+        )
+
+        self.assertEqual(
+            event["reminders"],
+            {
+                "useDefault": False,
+            },
+        )
+
+        self.assertTrue(
+            event["summary"].startswith(
+                "Done: "
+            )
+        )
+
+    def test_pending_homework_does_not_get_done_prefix(self):
+        event = self.event_for(
+            homework(
+                due="2026-09-21",
+            )
+        )
+
+        self.assertFalse(
+            event["summary"].startswith(
+                "Done: "
+            )
+        )
+
+    def test_dst_date_keeps_7am_local_time(self):
+        event = self.event_for(
+            homework(
+                due="2026-10-26",
+            )
+        )
+
+        self.assertEqual(
+            event["start"]["dateTime"],
+            "2026-10-26T07:00:00+00:00",
+        )
+
+        self.assertEqual(
+            event["end"]["dateTime"],
+            "2026-10-26T07:15:00+00:00",
         )
 
 
