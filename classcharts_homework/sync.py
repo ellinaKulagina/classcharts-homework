@@ -38,13 +38,7 @@ def _days(env, name, default):
     return int(value)
 
 
-def date_window(
-    env,
-    *,
-    from_date=None,
-    to_date=None,
-    now=None,
-):
+def date_window(env, *, from_date=None, to_date=None, now=None):
     zone = _zone(
         env.get(
             "CALENDAR_TIMEZONE",
@@ -115,9 +109,7 @@ def _due_date(value, zone):
         )
 
         if parsed.tzinfo:
-            return parsed.astimezone(
-                zone
-            ).date()
+            return parsed.astimezone(zone).date()
 
         return parsed.date()
 
@@ -132,30 +124,94 @@ def _due_date(value, zone):
         ) from None
 
 
-def build_events(
-    homework: list[Homework],
-    student_id: int,
-    zone,
-) -> list[dict]:
-    """Validate the entire batch before writing."""
-
-    if (
-        type(student_id) is not int
-        or student_id <= 0
-    ):
+def _source(student_id):
+    if type(student_id) is not int or student_id <= 0:
         raise CalendarError(
             "An authenticated student identity is required "
             "for calendar sync."
         )
 
-    source = hashlib.sha256(
+    return hashlib.sha256(
         (
             "classcharts-student-v1:"
             + str(student_id)
         ).encode()
     ).hexdigest()
 
-    events = {}
+
+def _is_done(item):
+    return (
+        item.ticked is True
+        or item.status == "completed"
+    )
+
+
+def _legacy_event_id(source, homework_id):
+    return (
+        "cc"
+        + hashlib.sha256(
+            (
+                source
+                + ":"
+                + str(homework_id)
+            ).encode()
+        ).hexdigest()
+    )
+
+
+def _grouped_event_id(source, due):
+    return (
+        "cc"
+        + hashlib.sha256(
+            (
+                source
+                + ":due:"
+                + due.isoformat()
+            ).encode()
+        ).hexdigest()
+    )
+
+
+def legacy_event_ids(
+    homework: list[Homework],
+    student_id: int,
+):
+    """
+    Return IDs used by the old one-event-per-homework format.
+
+    These are used only to migrate events previously created by this
+    automation.
+    """
+
+    source = _source(student_id)
+
+    return sorted(
+        {
+            _legacy_event_id(
+                source,
+                item.id,
+            )
+            for item in homework
+            if item.due_date
+        }
+    )
+
+
+def build_events(
+    homework: list[Homework],
+    student_id: int,
+    zone,
+) -> list[dict]:
+    """
+    Build one Google Calendar event per due date.
+
+    Multiple homework items due on the same day are listed inside the
+    same event.
+    """
+
+    source = _source(student_id)
+
+    grouped = {}
 
     for item in homework:
         if not item.due_date:
@@ -164,6 +220,23 @@ def build_events(
         due = _due_date(
             item.due_date,
             zone,
+        )
+
+        grouped.setdefault(
+            due,
+            [],
+        ).append(item)
+
+    events = []
+
+    for due in sorted(grouped):
+        items = sorted(
+            grouped[due],
+            key=lambda item: (
+                (item.subject or "").casefold(),
+                item.title.casefold(),
+                str(item.id),
+            ),
         )
 
         start = datetime.combine(
@@ -176,47 +249,59 @@ def build_events(
             minutes=15
         )
 
-        event_id = (
-            "cc"
-            + hashlib.sha256(
-                (
-                    source
-                    + ":"
-                    + str(item.id)
-                ).encode()
-            ).hexdigest()
+        all_done = all(
+            _is_done(item)
+            for item in items
         )
 
-        done = (
-            item.ticked is True
-            or item.status == "completed"
-        )
+        lines = []
 
-        title = " ".join(
-            item.title.split()
-        )
+        for item in items:
+            title = " ".join(
+                item.title.split()
+            )
 
-        subject = " ".join(
-            (item.subject or "").split()
-        )
+            subject = " ".join(
+                (item.subject or "").split()
+            )
+
+            text = (
+                ((subject + ": ") if subject else "")
+                + title
+            )
+
+            if _is_done(item):
+                text = "Done: " + text
+
+            lines.append(text)
+
+        count = len(items)
 
         summary = (
-            ("Done: " if done else "")
+            ("Done: " if all_done else "")
+            + "Homework due today"
             + (
-                (subject + ": ")
-                if subject
+                " (" + str(count) + ")"
+                if count > 1
                 else ""
             )
-            + title
+        )
+
+        description = (
+            "Homework due today:\n\n"
+            + "\n".join(lines)
+            + "\n\n"
+            + "Open ClassCharts for homework instructions.\n"
+            + "https://www.classcharts.com/student"
         )
 
         event = {
-            "id": event_id,
-            "summary": summary[:1024],
-            "description": (
-                "Open ClassCharts for homework instructions.\n"
-                "https://www.classcharts.com/student"
+            "id": _grouped_event_id(
+                source,
+                due,
             ),
+            "summary": summary[:1024],
+            "description": description,
             "start": {
                 "dateTime": start.isoformat(),
                 "timeZone": getattr(
@@ -236,43 +321,27 @@ def build_events(
             "status": "confirmed",
             "visibility": "private",
             "transparency": "transparent",
-
-            # Pending homework uses Kirill's default
-            # notifications configured on the Homework calendar.
-            #
-            # Completed homework explicitly disables notifications.
             "reminders": (
                 {
                     "useDefault": False,
                 }
-                if done
+                if all_done
                 else {
                     "useDefault": True,
                 }
             ),
-
             "extendedProperties": {
                 "private": {
-                    "cc_managed": "v1",
+                    "cc_managed": "v2",
                     "cc_source": source,
+                    "cc_due": due.isoformat(),
                 }
             },
         }
 
-        if (
-            event_id in events
-            and events[event_id] != event
-        ):
-            raise CalendarError(
-                "Conflicting homework records were returned; "
-                "no sync was started."
-            )
+        events.append(event)
 
-        events[event_id] = event
-
-    return list(
-        events.values()
-    )
+    return events
 
 
 def synchronize(
@@ -296,11 +365,34 @@ def synchronize(
         zone,
     )
 
+    old_event_ids = legacy_event_ids(
+        homework,
+        student.student_id,
+    )
+
+    source = _source(
+        student.student_id
+    )
+
     calendar.check_access()
 
+    # Create/update the new grouped events first.
+    # We do not delete anything until these succeed.
     for event in events:
         calendar.upsert(
             event,
+            dry_run=not apply,
+        )
+
+    # Remove only events created by the old v1 implementation.
+    # Manual calendar events can never match these ownership markers.
+    for event_id in old_event_ids:
+        calendar.delete_owned(
+            event_id,
+            {
+                "cc_managed": "v1",
+                "cc_source": source,
+            },
             dry_run=not apply,
         )
 
@@ -316,9 +408,7 @@ def main(argv=None):
     parser.add_argument(
         "--apply",
         action="store_true",
-        help=(
-            "Create and update managed calendar events."
-        ),
+        help="Create and update managed calendar events.",
     )
 
     parser.add_argument(

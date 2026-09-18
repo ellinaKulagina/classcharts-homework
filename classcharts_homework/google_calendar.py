@@ -202,3 +202,69 @@ class GoogleCalendar:
         if not etag:
             raise CalendarError("Google returned no event version; refusing an unsafe update.")
         self._json(self._request("PUT", suffix + "?sendUpdates=none", desired, etag=etag))
+
+    def delete_owned(
+        self,
+        event_id,
+        expected_private,
+        *,
+        dry_run=True,
+    ):
+        """
+        Delete an event only when its ID and private ownership markers
+        prove that it belongs to this automation.
+        """
+
+        if not re.fullmatch(
+            r"[0-9a-v]{5,1024}",
+            event_id,
+        ):
+            raise CalendarError(
+                "Invalid managed event identifier."
+            )
+
+        suffix = "/" + event_id
+
+        reply = self._request(
+            "GET",
+            suffix,
+        )
+
+        if reply.status in (404, 410):
+            return
+
+        existing = self._json(reply)
+
+        expected = {
+            "id": event_id,
+            "extendedProperties": {
+                "private": expected_private,
+            },
+        }
+
+        self._owned(
+            existing,
+            expected,
+        )
+
+        if dry_run:
+            return
+
+        etag = existing.get("etag")
+
+        if not etag:
+            raise CalendarError(
+                "Google returned no event version; "
+                "refusing an unsafe deletion."
+            )
+
+        reply = self._request(
+            "DELETE",
+            suffix + "?sendUpdates=none",
+            etag=etag,
+        )
+
+        if reply.status in (204, 404, 410):
+            return
+
+        self._json(reply)
