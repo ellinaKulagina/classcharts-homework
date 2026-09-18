@@ -201,4 +201,4 @@ class GoogleCalendar:
         etag = existing.get("etag")
         if not etag:
             raise CalendarError("Google returned no event version; refusing an unsafe update.")
-        self._json(self._request("PATCH", suffix + "?sendUpdates=none", changes, etag=etag))
+        self._json(self._request("PUT", suffix + "?sendUpdates=none", desired, etag=etag))
