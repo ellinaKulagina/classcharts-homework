@@ -1,0 +1,44 @@
+# Credentials and local configuration (the template has no values).
+.env
+.env.*
+!.env.example
+.envrc
+secrets/
+credentials/
+*credentials*.json
+*token*.json
+*.pem
+*.key
+*.json
+*.p12
+*.pfx
+
+# Never track downloaded pupil data, responses, logs, or exports.
+data/
+private/
+exports/
+artifacts/
+work/
+*.log
+*.jsonl
+*.csv
+*.ics
+homework*.json
+response*.json
+session*.json
+*.har
+
+# Python / local tools.
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.coverage*
+htmlcov/
+build/
+dist/
+*.egg-info/
+.DS_Store
+.idea/
+.vscode/

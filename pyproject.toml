@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "classcharts-homework"
+version = "0.1.0"
+description = "Privacy-conscious ClassCharts student homework client"
+requires-python = ">=3.9"
+dependencies = []
+
+[project.optional-dependencies]
+calendar = ["google-auth==2.50.0", "cryptography==50.0.1"]
+
+[project.scripts]
+classcharts-homework = "classcharts_homework.__main__:main"
+classcharts-sync = "classcharts_homework.sync:main"
+
+[tool.setuptools.packages.find]
+include = ["classcharts_homework*"]

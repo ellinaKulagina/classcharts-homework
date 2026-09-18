@@ -1,0 +1,53 @@
+name: Sync homework to Google Calendar
+
+on:
+  schedule:
+    - cron: '17 */6 * * *' # UTC; GitHub schedules may be delayed.
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: 'Create/update events (false = read-only dry run)'
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: classcharts-calendar-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    # Scheduled writes start only after the owner explicitly enables this variable.
+    if: github.event_name == 'workflow_dispatch' || vars.SYNC_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - name: Install calendar dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements-calendar.txt
+      - name: Sync privately
+        env:
+          CLASSCHARTS_PUPIL_CODE: ${{ secrets.CLASSCHARTS_PUPIL_CODE }}
+          CLASSCHARTS_DOB: ${{ secrets.CLASSCHARTS_DOB }}
+          GOOGLE_CALENDAR_ID: ${{ secrets.GOOGLE_CALENDAR_ID }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          CALENDAR_TIMEZONE: ${{ vars.CALENDAR_TIMEZONE || 'Europe/London' }}
+          SYNC_DAYS_BACK: ${{ vars.SYNC_DAYS_BACK || '7' }}
+          SYNC_DAYS_AHEAD: ${{ vars.SYNC_DAYS_AHEAD || '90' }}
+          APPLY: ${{ github.event_name == 'schedule' || inputs.apply }}
+        shell: bash
+        run: |
+          set +x
+          if [ "$APPLY" = "true" ]; then
+            python -m classcharts_homework.sync --apply
+          else
+            python -m classcharts_homework.sync
+          fi

@@ -1,0 +1,8 @@
+# Pinned runtime dependencies; compatible with the existing Python 3.9 client.
+cffi==2.0.0
+cryptography==50.0.1
+google-auth==2.50.0
+pyasn1==0.6.4
+pyasn1-modules==0.4.2
+pycparser==2.23
+typing-extensions==4.16.0
