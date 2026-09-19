@@ -60,7 +60,7 @@ class SyncEventTests(unittest.TestCase):
 
         self.assertEqual(
             event["end"]["dateTime"],
-            "2026-09-21T07:15:00+01:00",
+            "2026-09-21T08:00:00+01:00",
         )
 
     def test_three_tasks_same_day_become_one_event(self):

@@ -246,7 +246,7 @@ def build_events(
         )
 
         end = start + timedelta(
-            minutes=15
+            hours=1
         )
 
         all_done = all(
