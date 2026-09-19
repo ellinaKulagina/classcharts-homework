@@ -234,6 +234,8 @@ class GoogleCalendar:
             return
 
         existing = self._json(reply)
+        if existing.get("status") == "cancelled":
+            return
 
         expected = {
             "id": event_id,
